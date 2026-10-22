@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type Service = {
   id: number;
@@ -21,6 +22,7 @@ type Request = {
   service: string;
   message: string;
   date: string;
+  submittedToDatabase?: boolean;
 };
 
 const services: Service[] = [
@@ -160,7 +162,7 @@ const faqs = [
   },
   {
     q: "Can I submit an assistance request here?",
-    a: "Yes, you can save a request in this prototype on this browser. It is not sent to a government office or reviewed by staff.",
+    a: "You can submit a demo request to the SeniorAssist database. It is not sent directly to a government office or reviewed by staff. Use dummy details only.",
   },
   {
     q: "Are the listed benefits guaranteed?",
@@ -192,6 +194,7 @@ export default function Home() {
   const [formService, setFormService] = useState(services[0].title);
   const [formMessage, setFormMessage] = useState("");
   const [formFeedback, setFormFeedback] = useState("");
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [faqSearch, setFaqSearch] = useState("");
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatAnswer, setChatAnswer] = useState("");
@@ -254,26 +257,56 @@ export default function Home() {
     );
   }
 
-  function submitRequest(event: React.FormEvent<HTMLFormElement>) {
+  async function submitRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (isSubmittingRequest) return;
+    setIsSubmittingRequest(true);
+    setFormFeedback("");
+
+    const requestId = `SA-${Date.now().toString().slice(-8)}`;
     const request: Request = {
-      id: `SA-${Date.now().toString().slice(-8)}`,
+      id: requestId,
       name: formName.trim(),
       contact: formContact.trim(),
       service: formService,
       message: formMessage.trim(),
       date: new Date().toLocaleDateString(),
+      submittedToDatabase: true,
     };
 
-    setRequests((current) => [request, ...current]);
-    setFormFeedback(
-      `Request ${request.id} saved on this device. It has NOT been sent to an office.`
-    );
-    setFormName("");
-    setFormContact("");
-    setFormMessage("");
-    setShowRequestForm(false);
+    try {
+      const { error } = await supabase.from("assistance_requests").insert({
+        full_name: request.name,
+        contact_number: request.contact || null,
+        service_type: request.service,
+        message: request.message || null,
+      });
+
+      if (error) {
+        console.error("Supabase request submission failed:", error.message);
+        setFormFeedback(
+          "We couldn't submit this request to the database. Please check your connection settings and try again."
+        );
+        return;
+      }
+
+      setRequests((current) => [request, ...current]);
+      setFormFeedback(
+        `Request ${request.id} was submitted to the SeniorAssist database. A copy is also saved in this browser. It has NOT been sent directly to a government office.`
+      );
+      setFormName("");
+      setFormContact("");
+      setFormMessage("");
+      setShowRequestForm(false);
+    } catch (error) {
+      console.error("Unexpected request submission error:", error);
+      setFormFeedback(
+        "Something went wrong while submitting your request. Please try again."
+      );
+    } finally {
+      setIsSubmittingRequest(false);
+    }
   }
 
   function answerQuestion(event: React.FormEvent<HTMLFormElement>) {
@@ -561,7 +594,7 @@ export default function Home() {
                       }}
                       className="rounded-xl bg-[#1d6547] px-5 py-3 font-semibold text-white"
                     >
-                      Create local request
+                      Submit assistance request
                     </button>
                   </div>
                   {showRequestForm && <RequestForm
@@ -574,6 +607,7 @@ export default function Home() {
                     formMessage={formMessage}
                     setFormMessage={setFormMessage}
                     onSubmit={submitRequest}
+                    isSubmitting={isSubmittingRequest}
                     onCancel={() => setShowRequestForm(false)}
                   />}
                 </div>
@@ -717,8 +751,8 @@ export default function Home() {
             <section>
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm leading-6 text-gray-600">
-                  Requests are saved only in this browser on this device.
-                  They are not transmitted to any office.
+                  New requests are submitted to the SeniorAssist database and a copy is kept in this browser.
+                  They are not sent directly to a government office. Use dummy details for testing.
                 </p>
                 <button
                   onClick={() => {
@@ -741,6 +775,7 @@ export default function Home() {
                 formMessage={formMessage}
                 setFormMessage={setFormMessage}
                 onSubmit={submitRequest}
+                isSubmitting={isSubmittingRequest}
                 onCancel={() => setShowRequestForm(false)}
               />}
 
@@ -763,8 +798,12 @@ export default function Home() {
                             {request.id} · {request.date}
                           </p>
                         </div>
-                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                          Saved locally
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          request.submittedToDatabase
+                            ? "bg-green-100 text-green-900"
+                            : "bg-amber-100 text-amber-900"
+                        }`}>
+                          {request.submittedToDatabase ? "Submitted to database" : "Older local copy"}
                         </span>
                       </div>
                       <p className="mt-3 text-sm text-gray-700">Name: {request.name}</p>
@@ -776,7 +815,7 @@ export default function Home() {
                         onClick={() => setRequests((current) => current.filter((item) => item.id !== request.id))}
                         className="mt-4 text-sm font-semibold text-red-700 hover:underline"
                       >
-                        Delete local request
+                        Delete browser copy
                       </button>
                     </article>
                   ))}
@@ -797,13 +836,11 @@ export default function Home() {
               <ul className="mt-3 list-inside list-disc space-y-2 text-sm leading-6 text-gray-600">
                 <li>Searchable service information and category filters.</li>
                 <li>Bookmarks stored in the current browser.</li>
-                <li>Local demonstration request form.</li>
+                <li>Demonstration request form connected to the database.</li>
                 <li>Predefined FAQ guidance.</li>
               </ul>
               <div className="mt-6 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                <strong>Privacy note:</strong> Do not enter real sensitive personal
-                information. Local browser data is not a secure case-management
-                system. This prototype is not an official government service.
+                <strong>Privacy note:</strong> Use dummy information only. This student prototype is not a secure case-management system, and requests are not sent directly to a government office.
               </div>
             </section>
           )}
@@ -872,6 +909,7 @@ function RequestForm({
   formMessage,
   setFormMessage,
   onSubmit,
+  isSubmitting,
   onCancel,
 }: {
   formName: string;
@@ -882,7 +920,8 @@ function RequestForm({
   setFormService: (value: string) => void;
   formMessage: string;
   setFormMessage: (value: string) => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
+  isSubmitting: boolean;
   onCancel: () => void;
 }) {
   return (
@@ -893,8 +932,8 @@ function RequestForm({
       <div>
         <h3 className="text-lg font-bold">Assistance request form</h3>
         <p className="mt-1 text-xs leading-5 text-gray-600">
-          Demo only: avoid real sensitive information. The request is saved locally,
-          not submitted to an office.
+          Demo only: use dummy details. Submissions are saved in the SeniorAssist database,
+          but are not sent directly to a government office.
         </p>
       </div>
 
@@ -964,9 +1003,10 @@ function RequestForm({
       <div className="flex flex-wrap gap-3">
         <button
           type="submit"
-          className="rounded-xl bg-[#1d6547] px-5 py-3 font-semibold text-white"
+          disabled={isSubmitting}
+          className="rounded-xl bg-[#1d6547] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Save demo request
+          {isSubmitting ? "Submitting..." : "Submit assistance request"}
         </button>
         <button
           type="button"
